@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, SkipBack, SkipForward, Plus, Clock, Disc3, Rewind, FastForward, List, Mic2 } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Plus, Clock, Disc3, Rewind, FastForward, Mic2, ScanLine, Loader2 } from "lucide-react";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
 import { useHistory } from "@/hooks/use-history";
 import { useLyrics } from "@/hooks/use-lyrics";
@@ -11,10 +11,9 @@ function formatTime(seconds: number) {
   if (isNaN(seconds)) return "0:00";
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// Helper to remove extension for cleaner display
 function formatTitle(filename: string) {
   return filename.replace(/\.[^/.]+$/, "");
 }
@@ -22,14 +21,17 @@ function formatTitle(filename: string) {
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
-  
+
   const {
     currentTrack,
     isPlaying,
     progress,
     currentTime,
     duration,
+    isScanning,
+    isAndroid,
     loadFiles,
+    scanAndroidMusic,
     togglePlayPause,
     playNext,
     playPrev,
@@ -52,42 +54,63 @@ export default function Home() {
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-black text-white p-6 md:p-12 relative overflow-hidden">
-      
+
       {/* Hidden File Input */}
-      <input 
-        type="file" 
-        accept="audio/*" 
-        multiple 
+      <input
+        type="file"
+        accept="audio/*"
+        multiple
         ref={fileInputRef}
         onChange={(e) => loadFiles(e.target.files)}
-        className="hidden" 
+        className="hidden"
+        data-testid="input-file"
       />
 
-      {/* Top Header / Actions */}
+      {/* Top Header */}
       <header className="flex justify-between items-center z-10">
         <div className="flex items-center gap-3 opacity-50">
-          <Disc3 size={18} className={isPlaying ? "animate-[spin_4s_linear_infinite]" : ""} />
+          <Disc3
+            size={18}
+            className={isPlaying ? "animate-[spin_4s_linear_infinite]" : ""}
+          />
           <span className="text-sm tracking-widest font-medium uppercase">Player</span>
         </div>
-        
-        <div className="flex items-center gap-3">
+
+        <div className="flex items-center gap-4">
           {currentTrack && (
-            <button 
+            <button
               onClick={() => setIsLyricsOpen(!isLyricsOpen)}
               className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow"
               data-testid="button-lyrics"
             >
               <Mic2 size={16} />
-              <span>Lyrics</span>
+              <span className="hidden md:inline">Lyrics</span>
             </button>
           )}
-          <button 
+
+          {/* Auto Scan — always shown, works in Android app */}
+          <button
+            onClick={scanAndroidMusic}
+            disabled={isScanning}
+            className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow disabled:opacity-20"
+            data-testid="button-scan"
+            title={isAndroid ? "Scan all music on device" : "Auto-scan (Android app only)"}
+          >
+            {isScanning ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <ScanLine size={16} />
+            )}
+            <span className="hidden md:inline">{isScanning ? "Scanning..." : "Scan"}</span>
+          </button>
+
+          <button
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow"
             data-testid="button-load"
           >
             <Plus size={16} />
-            <span>Load</span>
+            <span className="hidden md:inline">Load</span>
           </button>
         </div>
       </header>
@@ -96,7 +119,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col justify-center items-center max-w-5xl mx-auto w-full z-10 mt-12 md:mt-0 px-4">
         <AnimatePresence mode="wait">
           {currentTrack ? (
-            <motion.div 
+            <motion.div
               key="player"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -104,9 +127,9 @@ export default function Home() {
               transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
               className="w-full flex flex-col md:flex-row items-center md:items-start gap-12 md:gap-16"
             >
-              {/* Cover Art Area */}
+              {/* Cover Art */}
               <div className="flex-shrink-0">
-                <motion.div 
+                <motion.div
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ delay: 0.2, duration: 0.6 }}
@@ -121,15 +144,16 @@ export default function Home() {
                     </motion.div>
                     <div className="text-center">
                       <p className="text-sm text-white/50 uppercase tracking-widest">Now Playing</p>
-                      <p className="text-xs text-white/30 uppercase tracking-widest mt-2">Audio File</p>
+                      <p className="text-xs text-white/30 uppercase tracking-widest mt-2">
+                        {playlist.length} track{playlist.length !== 1 ? "s" : ""}
+                      </p>
                     </div>
                   </div>
                 </motion.div>
               </div>
 
-              {/* Player Controls & Metadata */}
+              {/* Controls & Metadata */}
               <div className="flex-1 w-full md:w-auto flex flex-col gap-8">
-                {/* Track Title */}
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -140,8 +164,8 @@ export default function Home() {
                   </h1>
                 </motion.div>
 
-                {/* Metadata */}
-                <motion.div 
+                {/* Metadata Grid */}
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.4 }}
@@ -166,7 +190,7 @@ export default function Home() {
                 </motion.div>
 
                 {/* Progress Bar */}
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.5 }}
@@ -179,60 +203,38 @@ export default function Home() {
                   </div>
                 </motion.div>
 
-                {/* Main Controls */}
-                <motion.div 
+                {/* Playback Controls */}
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.6 }}
                   className="flex items-center justify-center gap-6 md:gap-8 mt-4"
                 >
-                  <button 
-                    onClick={() => playPrev()} 
-                    className="hover-glow p-3 text-white/60"
-                    data-testid="button-prev-track"
-                  >
+                  <button onClick={() => playPrev()} className="hover-glow p-3 text-white/60" data-testid="button-prev-track">
                     <SkipBack size={20} strokeWidth={1.5} />
                   </button>
-
-                  <button 
-                    onClick={() => skipBackward(10)} 
-                    className="hover-glow p-3 text-white/60"
-                    data-testid="button-rewind"
-                  >
+                  <button onClick={() => skipBackward(10)} className="hover-glow p-3 text-white/60" data-testid="button-rewind">
                     <Rewind size={20} strokeWidth={1.5} />
                   </button>
-                  
-                  <button 
-                    onClick={togglePlayPause} 
+                  <button
+                    onClick={togglePlayPause}
                     className="hover-glow p-4 rounded-full border border-white/20 hover:border-white/40 transition-colors"
                     data-testid="button-play-pause"
                   >
-                    {isPlaying ? (
-                      <Pause size={28} strokeWidth={1.2} />
-                    ) : (
-                      <Play size={28} strokeWidth={1.2} className="ml-1" />
-                    )}
+                    {isPlaying
+                      ? <Pause size={28} strokeWidth={1.2} />
+                      : <Play size={28} strokeWidth={1.2} className="ml-1" />
+                    }
                   </button>
-
-                  <button 
-                    onClick={() => skipForward(10)} 
-                    className="hover-glow p-3 text-white/60"
-                    data-testid="button-forward"
-                  >
+                  <button onClick={() => skipForward(10)} className="hover-glow p-3 text-white/60" data-testid="button-forward">
                     <FastForward size={20} strokeWidth={1.5} />
                   </button>
-
-                  <button 
-                    onClick={() => playNext()} 
-                    className="hover-glow p-3 text-white/60"
-                    data-testid="button-next-track"
-                  >
+                  <button onClick={() => playNext()} className="hover-glow p-3 text-white/60" data-testid="button-next-track">
                     <SkipForward size={20} strokeWidth={1.5} />
                   </button>
                 </motion.div>
 
-                {/* Secondary Controls */}
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.7 }}
@@ -245,39 +247,54 @@ export default function Home() {
               </div>
             </motion.div>
           ) : (
-            <motion.div 
+            <motion.div
               key="empty"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.8 }}
-              className="flex flex-col items-center justify-center gap-8"
+              className="flex flex-col items-center justify-center gap-16"
             >
-              <button 
+              {/* Load Button */}
+              <button
                 onClick={() => fileInputRef.current?.click()}
                 className="group relative flex flex-col items-center justify-center"
                 data-testid="button-load-music"
               >
-                <motion.div 
+                <motion.div
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   className="w-40 h-40 md:w-56 md:h-56 rounded-xl border border-white/20 group-hover:border-white/40 flex items-center justify-center transition-all duration-700 backdrop-blur-sm bg-white/[0.02]"
                 >
                   <Play size={48} strokeWidth={0.5} className="text-white/40 group-hover:text-white/70 transition-colors duration-700" />
                 </motion.div>
-                <span className="absolute -bottom-16 text-sm tracking-[0.3em] font-light text-white/60 group-hover:text-white transition-colors duration-500">
+                <span className="absolute -bottom-10 text-sm tracking-[0.3em] font-light text-white/60 group-hover:text-white transition-colors duration-500">
                   LOAD MUSIC
                 </span>
               </button>
-              
-              <motion.p 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.3 }}
-                className="text-center text-white/40 text-sm tracking-widest uppercase mt-8"
+
+              {/* Auto Scan Button */}
+              <motion.button
+                onClick={scanAndroidMusic}
+                disabled={isScanning}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-3 px-8 py-3 rounded-lg border border-white/10 hover:border-white/25 text-white/40 hover:text-white/70 transition-all text-sm tracking-widest uppercase font-light disabled:opacity-30"
+                data-testid="button-scan-empty"
               >
-                No tracks loaded<br/>Click to select audio files
-              </motion.p>
+                {isScanning ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <ScanLine size={16} />
+                )}
+                {isScanning ? "Scanning device..." : "Auto Scan Music"}
+              </motion.button>
+
+              {!isAndroid && (
+                <p className="text-xs text-white/20 uppercase tracking-widest text-center -mt-8">
+                  Auto scan works in the Android app
+                </p>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -290,7 +307,7 @@ export default function Home() {
             <Clock size={14} />
             <h3 className="text-xs uppercase tracking-widest font-medium">History</h3>
           </div>
-          
+
           {isHistoryLoading ? (
             <div className="text-xs text-[#333] uppercase tracking-widest animate-pulse">Loading...</div>
           ) : historyItems && historyItems.length > 0 ? (
@@ -301,8 +318,8 @@ export default function Home() {
                     {formatTitle(item.filename)}
                   </span>
                   <span className="text-xs text-[#444] whitespace-nowrap font-mono">
-                    {new Date(item.playedAt).toLocaleDateString(undefined, { 
-                      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+                    {new Date(item.playedAt).toLocaleDateString(undefined, {
+                      month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
                     })}
                   </span>
                 </li>
@@ -313,8 +330,7 @@ export default function Home() {
           )}
         </div>
       </footer>
-      
-      {/* Subtle background gradient blob for extreme minimal depth */}
+
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-white/[0.01] rounded-full blur-3xl pointer-events-none" />
 
       {/* Lyrics Panel */}
