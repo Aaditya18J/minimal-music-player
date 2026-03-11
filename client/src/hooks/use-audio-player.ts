@@ -8,9 +8,11 @@ export function useAudioPlayer() {
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [shouldAutoPlay, setShouldAutoPlay] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const playlistRef = useRef<File[]>([]);
   
   const { mutate: addHistory } = useAddHistory();
 
@@ -50,12 +52,17 @@ export function useAudioPlayer() {
       audio.pause();
       audio.src = "";
     };
-  }, []); // Empty deps, single instance
+  }, []);
+
+  // Update ref whenever playlist changes
+  useEffect(() => {
+    playlistRef.current = playlist;
+  }, [playlist]);
 
   const playTrack = useCallback(async (index: number) => {
-    if (!audioRef.current || index < 0 || index >= playlist.length) return;
+    if (!audioRef.current || index < 0 || index >= playlistRef.current.length) return;
     
-    const file = playlist[index];
+    const file = playlistRef.current[index];
     
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
@@ -70,23 +77,25 @@ export function useAudioPlayer() {
       await audioRef.current.play();
       setCurrentIndex(index);
       addHistory({ filename: file.name });
+      console.log("Playing track:", index, file.name);
     } catch (err) {
       console.error("Playback failed:", err);
     }
-  }, [playlist, addHistory]);
+  }, [addHistory]);
 
   const loadFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
     const newFiles = Array.from(files);
+    
     setPlaylist(prev => {
       const merged = [...prev, ...newFiles];
-      // If nothing is playing, play the first newly added track
+      // Mark that we should auto-play when files are added
       if (currentIndex === -1 && merged.length > 0) {
-        setTimeout(() => playTrack(prev.length), 0);
+        setShouldAutoPlay(true);
       }
       return merged;
     });
-  }, [currentIndex, playTrack]);
+  }, [currentIndex]);
 
   const togglePlayPause = useCallback(() => {
     if (!audioRef.current) return;
@@ -140,6 +149,14 @@ export function useAudioPlayer() {
       0
     );
   }, [duration]);
+
+  // Handle auto-play when files are added (after playTrack is defined)
+  useEffect(() => {
+    if (shouldAutoPlay && currentIndex === -1 && playlist.length > 0) {
+      playTrack(0);
+      setShouldAutoPlay(false);
+    }
+  }, [shouldAutoPlay, currentIndex, playlist.length, playTrack]);
 
   return {
     playlist,
