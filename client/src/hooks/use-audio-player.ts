@@ -125,6 +125,22 @@ export function useAudioPlayer() {
     audioRef.current.currentTime = time;
   }, [duration]);
 
+  const skipForward = useCallback((seconds: number = 10) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = Math.min(
+      audioRef.current.currentTime + seconds,
+      duration
+    );
+  }, [duration]);
+
+  const skipBackward = useCallback((seconds: number = 10) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = Math.max(
+      audioRef.current.currentTime - seconds,
+      0
+    );
+  }, [duration]);
+
   return {
     playlist,
     currentTrack: currentIndex >= 0 ? playlist[currentIndex] : null,
@@ -137,6 +153,8 @@ export function useAudioPlayer() {
     playNext: handleNext,
     playPrev: handlePrev,
     seek,
+    skipForward,
+    skipBackward,
     playTrack,
     currentIndex
   };

@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, SkipBack, SkipForward, Plus, Clock, Disc3 } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Plus, Clock, Disc3, Rewind, FastForward, List } from "lucide-react";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
 import { useHistory } from "@/hooks/use-history";
 import { MinimalProgressBar } from "@/components/AudioVisualizer";
@@ -31,6 +31,10 @@ export default function Home() {
     playNext,
     playPrev,
     seek,
+    skipForward,
+    skipBackward,
+    playlist,
+    currentIndex,
   } = useAudioPlayer();
 
   const { data: historyItems, isLoading: isHistoryLoading } = useHistory();
@@ -65,7 +69,7 @@ export default function Home() {
       </header>
 
       {/* Main Player Area */}
-      <main className="flex-1 flex flex-col justify-center items-center max-w-4xl mx-auto w-full z-10 mt-12 md:mt-0">
+      <main className="flex-1 flex flex-col justify-center items-center max-w-5xl mx-auto w-full z-10 mt-12 md:mt-0 px-4">
         <AnimatePresence mode="wait">
           {currentTrack ? (
             <motion.div 
@@ -74,60 +78,182 @@ export default function Home() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-              className="w-full flex flex-col items-center"
+              className="w-full flex flex-col md:flex-row items-center md:items-start gap-12 md:gap-16"
             >
-              <h1 className="text-4xl md:text-7xl lg:text-8xl font-light tracking-tighter text-center leading-none mb-16 md:mb-24 line-clamp-2 w-full px-4 break-words">
-                {formatTitle(currentTrack.name)}
-              </h1>
-
-              <div className="flex items-center justify-center gap-12 md:gap-24 mb-16 md:mb-24">
-                <button onClick={playPrev} className="hover-glow p-4">
-                  <SkipBack size={24} strokeWidth={1.5} />
-                </button>
-                
-                <button 
-                  onClick={togglePlayPause} 
-                  className="hover-glow p-6 rounded-full border border-white/10 hover:border-white/30 transition-colors"
+              {/* Cover Art Area */}
+              <div className="flex-shrink-0">
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.6 }}
+                  className="w-64 h-64 md:w-80 md:h-80 rounded-lg border border-white/10 bg-gradient-to-br from-white/5 to-white/[0.02] flex items-center justify-center backdrop-blur-sm hover:border-white/20 transition-colors duration-500"
                 >
-                  {isPlaying ? (
-                    <Pause size={32} strokeWidth={1} />
-                  ) : (
-                    <Play size={32} strokeWidth={1} className="ml-1" />
-                  )}
-                </button>
-                
-                <button onClick={playNext} className="hover-glow p-4">
-                  <SkipForward size={24} strokeWidth={1.5} />
-                </button>
+                  <div className="flex flex-col items-center justify-center gap-6">
+                    <motion.div
+                      animate={isPlaying ? { rotate: 360 } : { rotate: 0 }}
+                      transition={{ duration: isPlaying ? 3 : 0.5, repeat: isPlaying ? Infinity : 0, ease: "linear" }}
+                    >
+                      <Disc3 size={80} strokeWidth={0.5} className="text-white/30" />
+                    </motion.div>
+                    <div className="text-center">
+                      <p className="text-sm text-white/50 uppercase tracking-widest">Now Playing</p>
+                      <p className="text-xs text-white/30 uppercase tracking-widest mt-2">Audio File</p>
+                    </div>
+                  </div>
+                </motion.div>
               </div>
 
-              <div className="w-full max-w-2xl px-4 flex flex-col items-center gap-2">
-                <MinimalProgressBar progress={progress} onSeek={seek} />
-                <div className="w-full flex justify-between text-xs text-[#666] font-mono tracking-wider">
-                  <span>{formatTime(currentTime)}</span>
-                  <span>{formatTime(duration)}</span>
-                </div>
+              {/* Player Controls & Metadata */}
+              <div className="flex-1 w-full md:w-auto flex flex-col gap-8">
+                {/* Track Title */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <h1 className="text-3xl md:text-5xl font-light tracking-tight leading-tight line-clamp-3 break-words">
+                    {formatTitle(currentTrack.name)}
+                  </h1>
+                </motion.div>
+
+                {/* Metadata */}
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.4 }}
+                  className="grid grid-cols-2 gap-6 text-sm"
+                >
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Duration</p>
+                    <p className="font-mono text-white/70">{formatTime(duration)}</p>
+                  </div>
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Position</p>
+                    <p className="font-mono text-white/70">{formatTime(currentTime)}</p>
+                  </div>
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Track</p>
+                    <p className="font-mono text-white/70">{currentIndex + 1} of {playlist.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Status</p>
+                    <p className="font-mono text-white/70">{isPlaying ? "Playing" : "Paused"}</p>
+                  </div>
+                </motion.div>
+
+                {/* Progress Bar */}
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 }}
+                  className="w-full flex flex-col items-center gap-3"
+                >
+                  <MinimalProgressBar progress={progress} onSeek={seek} />
+                  <div className="w-full flex justify-between text-xs text-white/40 font-mono tracking-wider">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                </motion.div>
+
+                {/* Main Controls */}
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.6 }}
+                  className="flex items-center justify-center gap-6 md:gap-8 mt-4"
+                >
+                  <button 
+                    onClick={() => playPrev()} 
+                    className="hover-glow p-3 text-white/60"
+                    data-testid="button-prev-track"
+                  >
+                    <SkipBack size={20} strokeWidth={1.5} />
+                  </button>
+
+                  <button 
+                    onClick={() => skipBackward(10)} 
+                    className="hover-glow p-3 text-white/60"
+                    data-testid="button-rewind"
+                  >
+                    <Rewind size={20} strokeWidth={1.5} />
+                  </button>
+                  
+                  <button 
+                    onClick={togglePlayPause} 
+                    className="hover-glow p-4 rounded-full border border-white/20 hover:border-white/40 transition-colors"
+                    data-testid="button-play-pause"
+                  >
+                    {isPlaying ? (
+                      <Pause size={28} strokeWidth={1.2} />
+                    ) : (
+                      <Play size={28} strokeWidth={1.2} className="ml-1" />
+                    )}
+                  </button>
+
+                  <button 
+                    onClick={() => skipForward(10)} 
+                    className="hover-glow p-3 text-white/60"
+                    data-testid="button-forward"
+                  >
+                    <FastForward size={20} strokeWidth={1.5} />
+                  </button>
+
+                  <button 
+                    onClick={() => playNext()} 
+                    className="hover-glow p-3 text-white/60"
+                    data-testid="button-next-track"
+                  >
+                    <SkipForward size={20} strokeWidth={1.5} />
+                  </button>
+                </motion.div>
+
+                {/* Secondary Controls */}
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.7 }}
+                  className="flex items-center justify-center gap-4 mt-2 text-xs text-white/40"
+                >
+                  <span className="font-mono">-10s</span>
+                  <span>•</span>
+                  <span className="font-mono">+10s</span>
+                </motion.div>
               </div>
             </motion.div>
           ) : (
             <motion.div 
               key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col items-center justify-center text-[#444]"
+              transition={{ duration: 0.8 }}
+              className="flex flex-col items-center justify-center gap-8"
             >
               <button 
                 onClick={() => fileInputRef.current?.click()}
                 className="group relative flex flex-col items-center justify-center"
+                data-testid="button-load-music"
               >
-                <div className="w-32 h-32 md:w-48 md:h-48 rounded-full border-[1px] border-[#222] group-hover:border-white/20 flex items-center justify-center transition-all duration-700">
-                  <Play size={32} strokeWidth={0.5} className="ml-2 group-hover:text-white transition-colors duration-700" />
-                </div>
-                <span className="absolute -bottom-12 text-sm tracking-[0.3em] font-light group-hover:text-white/70 transition-colors duration-500">
-                  SELECT AUDIO
+                <motion.div 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="w-40 h-40 md:w-56 md:h-56 rounded-xl border border-white/20 group-hover:border-white/40 flex items-center justify-center transition-all duration-700 backdrop-blur-sm bg-white/[0.02]"
+                >
+                  <Play size={48} strokeWidth={0.5} className="text-white/40 group-hover:text-white/70 transition-colors duration-700" />
+                </motion.div>
+                <span className="absolute -bottom-16 text-sm tracking-[0.3em] font-light text-white/60 group-hover:text-white transition-colors duration-500">
+                  LOAD MUSIC
                 </span>
               </button>
+              
+              <motion.p 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="text-center text-white/40 text-sm tracking-widest uppercase mt-8"
+              >
+                No tracks loaded<br/>Click to select audio files
+              </motion.p>
             </motion.div>
           )}
         </AnimatePresence>
