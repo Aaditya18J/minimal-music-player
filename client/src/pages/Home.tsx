@@ -1,9 +1,11 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Pause, SkipBack, SkipForward, Plus, Clock, Disc3, Rewind, FastForward, List } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Plus, Clock, Disc3, Rewind, FastForward, List, Mic2 } from "lucide-react";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
 import { useHistory } from "@/hooks/use-history";
+import { useLyrics } from "@/hooks/use-lyrics";
 import { MinimalProgressBar } from "@/components/AudioVisualizer";
+import { LyricsPanel } from "@/components/LyricsPanel";
 
 function formatTime(seconds: number) {
   if (isNaN(seconds)) return "0:00";
@@ -19,6 +21,7 @@ function formatTitle(filename: string) {
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   
   const {
     currentTrack,
@@ -38,6 +41,14 @@ export default function Home() {
   } = useAudioPlayer();
 
   const { data: historyItems, isLoading: isHistoryLoading } = useHistory();
+
+  const {
+    lyrics,
+    updateLyrics,
+    clearLyrics,
+    isEditingLyrics,
+    toggleEditMode,
+  } = useLyrics(currentTrack?.name || null);
 
   return (
     <div className="min-h-screen w-full flex flex-col bg-black text-white p-6 md:p-12 relative overflow-hidden">
@@ -59,13 +70,26 @@ export default function Home() {
           <span className="text-sm tracking-widest font-medium uppercase">Player</span>
         </div>
         
-        <button 
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow"
-        >
-          <Plus size={16} />
-          <span>Load</span>
-        </button>
+        <div className="flex items-center gap-3">
+          {currentTrack && (
+            <button 
+              onClick={() => setIsLyricsOpen(!isLyricsOpen)}
+              className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow"
+              data-testid="button-lyrics"
+            >
+              <Mic2 size={16} />
+              <span>Lyrics</span>
+            </button>
+          )}
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow"
+            data-testid="button-load"
+          >
+            <Plus size={16} />
+            <span>Load</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Player Area */}
@@ -292,6 +316,20 @@ export default function Home() {
       
       {/* Subtle background gradient blob for extreme minimal depth */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-white/[0.01] rounded-full blur-3xl pointer-events-none" />
+
+      {/* Lyrics Panel */}
+      {currentTrack && (
+        <LyricsPanel
+          isOpen={isLyricsOpen}
+          onClose={() => setIsLyricsOpen(false)}
+          lyrics={lyrics}
+          onUpdateLyrics={updateLyrics}
+          onClearLyrics={clearLyrics}
+          isEditing={isEditingLyrics}
+          onToggleEdit={toggleEditMode}
+          trackName={formatTitle(currentTrack.name)}
+        />
+      )}
     </div>
   );
 }
