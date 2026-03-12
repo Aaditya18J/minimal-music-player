@@ -16,6 +16,7 @@ export type Track = {
   meta?: TrackMeta;
 };
 
+export type RepeatMode = "off" | "all" | "one";
 export type ScanStatus = "idle" | "scanning" | "success" | "no-bridge" | "failed";
 
 declare global {
@@ -56,13 +57,25 @@ export function useAudioPlayer() {
   const [duration, setDuration] = useState(0);
   const [shouldAutoPlay, setShouldAutoPlay] = useState(false);
   const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
+  const [shuffleMode, setShuffleMode] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playlistRef = useRef<Track[]>([]);
   const currentIndexRef = useRef(-1);
+  const repeatModeRef = useRef<RepeatMode>("off");
+  const shuffleModeRef = useRef(false);
+  const playTrackRef = useRef<((index: number) => Promise<void>) | null>(null);
 
   const { mutate: addHistory } = useAddHistory();
 
+  // Keep all refs in sync
+  useEffect(() => { playlistRef.current = playlist; }, [playlist]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
+  useEffect(() => { shuffleModeRef.current = shuffleMode; }, [shuffleMode]);
+
+  // Initialize audio element once
   useEffect(() => {
     const audio = new Audio();
     audioRef.current = audio;
@@ -74,23 +87,15 @@ export function useAudioPlayer() {
     const handleLoadedMetadata = () => setDuration(audio.duration);
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
-    const handleEnded = () => {
-      if (playlistRef.current.length > 0) {
-        const next = (currentIndexRef.current + 1) % playlistRef.current.length;
-        playTrackByIndex(next);
-      }
-    };
 
     audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audio.addEventListener("ended", handleEnded);
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
 
     return () => {
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.pause();
@@ -101,9 +106,6 @@ export function useAudioPlayer() {
       });
     };
   }, []);
-
-  useEffect(() => { playlistRef.current = playlist; }, [playlist]);
-  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
   const playTrackByIndex = useCallback(async (index: number) => {
     if (!audioRef.current || index < 0 || index >= playlistRef.current.length) return;
@@ -119,6 +121,51 @@ export function useAudioPlayer() {
     }
   }, [addHistory]);
 
+  // Keep playTrackRef current
+  useEffect(() => { playTrackRef.current = playTrackByIndex; }, [playTrackByIndex]);
+
+  // Ended handler — separate effect so it can use latest playTrack
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleEnded = () => {
+      const list = playlistRef.current;
+      const idx = currentIndexRef.current;
+      const repeat = repeatModeRef.current;
+      const shuffle = shuffleModeRef.current;
+
+      if (list.length === 0) return;
+
+      if (repeat === "one") {
+        audio.currentTime = 0;
+        audio.play().catch(console.error);
+        return;
+      }
+
+      if (shuffle) {
+        const available = list.map((_, i) => i).filter(i => i !== idx);
+        if (available.length > 0) {
+          playTrackRef.current?.(available[Math.floor(Math.random() * available.length)]);
+        } else if (repeat === "all") {
+          playTrackRef.current?.(idx);
+        }
+        return;
+      }
+
+      const next = idx + 1;
+      if (next < list.length) {
+        playTrackRef.current?.(next);
+      } else if (repeat === "all") {
+        playTrackRef.current?.(0);
+      }
+      // repeat === "off" and at end → stop (do nothing)
+    };
+
+    audio.addEventListener("ended", handleEnded);
+    return () => audio.removeEventListener("ended", handleEnded);
+  }, [playTrackByIndex]);
+
   const loadFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const fileArray = Array.from(files);
@@ -133,11 +180,11 @@ export function useAudioPlayer() {
     setPlaylist(prev => {
       insertStart = prev.length;
       const merged = [...prev, ...newTracks];
-      if (currentIndex === -1 && merged.length > 0) setShouldAutoPlay(true);
+      if (currentIndexRef.current === -1 && merged.length > 0) setShouldAutoPlay(true);
       return merged;
     });
 
-    // Extract metadata in background — non-blocking
+    // Extract metadata in background
     fileArray.forEach((file, i) => {
       extractMetadata(file).then(meta => {
         if (!meta) return;
@@ -145,50 +192,60 @@ export function useAudioPlayer() {
           const updated = [...prev];
           const idx = insertStart + i;
           if (updated[idx]) {
-            // Revoke old cover art if any
-            if (updated[idx].meta?.coverArtUrl) {
-              URL.revokeObjectURL(updated[idx].meta!.coverArtUrl!);
-            }
+            if (updated[idx].meta?.coverArtUrl) URL.revokeObjectURL(updated[idx].meta!.coverArtUrl!);
             updated[idx] = { ...updated[idx], meta };
           }
           return updated;
         });
       });
     });
-  }, [currentIndex]);
+  }, []);
+
+  const removeTrackFromQueue = useCallback((index: number) => {
+    setPlaylist(prev => {
+      const track = prev[index];
+      if (track?.isObjectUrl) URL.revokeObjectURL(track.src);
+      if (track?.meta?.coverArtUrl) URL.revokeObjectURL(track.meta.coverArtUrl);
+      return prev.filter((_, i) => i !== index);
+    });
+    setCurrentIndex(prev => {
+      if (prev === index) {
+        audioRef.current?.pause();
+        if (audioRef.current) audioRef.current.src = "";
+        return -1;
+      }
+      return prev > index ? prev - 1 : prev;
+    });
+  }, []);
 
   const scanAndroidMusic = useCallback(() => {
     const bridge = window.AndroidMusic || window.AndroidBridge;
     if (!bridge) {
       setScanStatus("no-bridge");
-      setTimeout(() => setScanStatus("idle"), 3000);
+      setTimeout(() => setScanStatus("idle"), 3500);
       return false;
     }
-
     setScanStatus("scanning");
     try {
-      const raw = bridge.scanAllMusic?.() || (bridge as any).scanMusic?.();
-      if (!raw) { setScanStatus("failed"); setTimeout(() => setScanStatus("idle"), 3000); return false; }
+      const raw = (bridge as any).scanAllMusic?.() || (bridge as any).scanMusic?.();
+      if (!raw) { setScanStatus("failed"); setTimeout(() => setScanStatus("idle"), 3500); return false; }
 
       const scanned: { name: string; uri: string }[] = JSON.parse(raw);
-      if (!scanned.length) { setScanStatus("failed"); setTimeout(() => setScanStatus("idle"), 3000); return false; }
+      if (!scanned.length) { setScanStatus("failed"); setTimeout(() => setScanStatus("idle"), 3500); return false; }
 
       const newTracks: Track[] = scanned.map(item => ({
-        name: item.name,
-        src: item.uri,
-        isObjectUrl: false,
+        name: item.name, src: item.uri, isObjectUrl: false,
       }));
-
       setPlaylist(newTracks);
       setCurrentIndex(-1);
       setShouldAutoPlay(true);
       setScanStatus("success");
-      setTimeout(() => setScanStatus("idle"), 3000);
+      setTimeout(() => setScanStatus("idle"), 3500);
       return true;
     } catch (err) {
       console.error("Scan failed:", err);
       setScanStatus("failed");
-      setTimeout(() => setScanStatus("idle"), 3000);
+      setTimeout(() => setScanStatus("idle"), 3500);
       return false;
     }
   }, []);
@@ -196,49 +253,67 @@ export function useAudioPlayer() {
   const isAndroid = typeof window !== "undefined" &&
     !!(window.AndroidMusic || window.AndroidBridge);
 
+  const cycleRepeat = useCallback(() => {
+    setRepeatMode(prev =>
+      prev === "off" ? "all" : prev === "all" ? "one" : "off"
+    );
+  }, []);
+
+  const toggleShuffle = useCallback(() => setShuffleMode(p => !p), []);
+
   const togglePlayPause = useCallback(() => {
     if (!audioRef.current) return;
     if (audioRef.current.paused) {
-      if (currentIndex === -1 && playlistRef.current.length > 0) {
+      if (currentIndexRef.current === -1 && playlistRef.current.length > 0) {
         playTrackByIndex(0);
-      } else if (currentIndex !== -1) {
+      } else if (currentIndexRef.current !== -1) {
         audioRef.current.play();
       }
     } else {
       audioRef.current.pause();
     }
-  }, [currentIndex, playTrackByIndex]);
+  }, [playTrackByIndex]);
 
   const handleNext = useCallback(() => {
-    if (playlistRef.current.length === 0) return;
-    playTrackByIndex((currentIndexRef.current + 1) % playlistRef.current.length);
+    const list = playlistRef.current;
+    if (list.length === 0) return;
+    if (shuffleModeRef.current) {
+      const available = list.map((_, i) => i).filter(i => i !== currentIndexRef.current);
+      if (available.length > 0) {
+        playTrackByIndex(available[Math.floor(Math.random() * available.length)]);
+      }
+      return;
+    }
+    playTrackByIndex((currentIndexRef.current + 1) % list.length);
   }, [playTrackByIndex]);
 
   const handlePrev = useCallback(() => {
-    if (playlistRef.current.length === 0) return;
+    const list = playlistRef.current;
+    if (list.length === 0) return;
     if (audioRef.current && audioRef.current.currentTime > 3) {
       audioRef.current.currentTime = 0;
       return;
     }
     const idx = currentIndexRef.current;
-    playTrackByIndex(idx <= 0 ? playlistRef.current.length - 1 : idx - 1);
+    playTrackByIndex(idx <= 0 ? list.length - 1 : idx - 1);
   }, [playTrackByIndex]);
 
-  const seek = useCallback((percentage: number) => {
+  const seek = useCallback((pct: number) => {
     if (!audioRef.current || !duration) return;
-    audioRef.current.currentTime = (percentage / 100) * duration;
+    audioRef.current.currentTime = (pct / 100) * duration;
   }, [duration]);
 
-  const skipForward = useCallback((seconds = 10) => {
+  const skipForward = useCallback((s = 10) => {
     if (!audioRef.current) return;
-    audioRef.current.currentTime = Math.min(audioRef.current.currentTime + seconds, duration);
+    audioRef.current.currentTime = Math.min(audioRef.current.currentTime + s, duration);
   }, [duration]);
 
-  const skipBackward = useCallback((seconds = 10) => {
+  const skipBackward = useCallback((s = 10) => {
     if (!audioRef.current) return;
-    audioRef.current.currentTime = Math.max(audioRef.current.currentTime - seconds, 0);
+    audioRef.current.currentTime = Math.max(audioRef.current.currentTime - s, 0);
   }, [duration]);
 
+  // Auto-play when new tracks loaded
   useEffect(() => {
     if (shouldAutoPlay && currentIndex === -1 && playlist.length > 0) {
       playTrackByIndex(0);
@@ -255,15 +330,20 @@ export function useAudioPlayer() {
     duration,
     scanStatus,
     isAndroid,
+    repeatMode,
+    shuffleMode,
+    currentIndex,
     loadFiles,
     scanAndroidMusic,
+    removeTrackFromQueue,
     togglePlayPause,
     playNext: handleNext,
     playPrev: handlePrev,
+    cycleRepeat,
+    toggleShuffle,
     seek,
     skipForward,
     skipBackward,
     playTrack: playTrackByIndex,
-    currentIndex,
   };
 }
