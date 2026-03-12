@@ -1,22 +1,49 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAddHistory } from "./use-history";
 
-// Unified track type that works for both browser files and Android URIs
+export type TrackMeta = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  year?: number;
+  coverArtUrl?: string;
+};
+
 export type Track = {
   name: string;
   src: string;
-  isObjectUrl: boolean; // true = we created it, must revoke on cleanup
+  isObjectUrl: boolean;
+  meta?: TrackMeta;
 };
 
-// Declare the Android bridge types so TypeScript knows about them
+export type ScanStatus = "idle" | "scanning" | "success" | "no-bridge" | "failed";
+
 declare global {
   interface Window {
-    AndroidMusic?: {
-      scanAllMusic: () => string; // Returns JSON string of [{name, uri}]
+    AndroidMusic?: { scanAllMusic: () => string };
+    AndroidBridge?: { scanMusic: () => string };
+  }
+}
+
+async function extractMetadata(file: File): Promise<TrackMeta | undefined> {
+  try {
+    const mm = await import("music-metadata-browser");
+    const meta = await mm.parseBlob(file, { skipCovers: false });
+    let coverArtUrl: string | undefined;
+    const pic = meta.common.picture?.[0];
+    if (pic) {
+      const blob = new Blob([pic.data], { type: pic.format });
+      coverArtUrl = URL.createObjectURL(blob);
+    }
+    return {
+      title: meta.common.title,
+      artist: meta.common.artist,
+      album: meta.common.album,
+      year: meta.common.year,
+      coverArtUrl,
     };
-    AndroidBridge?: {
-      scanMusic: () => string; // Alternate name Gemini may have used
-    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -28,14 +55,14 @@ export function useAudioPlayer() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [shouldAutoPlay, setShouldAutoPlay] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState<ScanStatus>("idle");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playlistRef = useRef<Track[]>([]);
+  const currentIndexRef = useRef(-1);
 
   const { mutate: addHistory } = useAddHistory();
 
-  // Initialize audio element once
   useEffect(() => {
     const audio = new Audio();
     audioRef.current = audio;
@@ -48,10 +75,10 @@ export function useAudioPlayer() {
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
-      // Use ref to avoid stale closure
-      const idx = playlistRef.current.findIndex((_, i) => i === currentIndexRef.current);
-      const next = (idx + 1) % playlistRef.current.length;
-      if (playlistRef.current.length > 0) playTrackByIndex(next);
+      if (playlistRef.current.length > 0) {
+        const next = (currentIndexRef.current + 1) % playlistRef.current.length;
+        playTrackByIndex(next);
+      }
     };
 
     audio.addEventListener("timeupdate", handleTimeUpdate);
@@ -68,14 +95,14 @@ export function useAudioPlayer() {
       audio.removeEventListener("pause", handlePause);
       audio.pause();
       audio.src = "";
-      // Revoke any object URLs we created
-      playlistRef.current.forEach(t => { if (t.isObjectUrl) URL.revokeObjectURL(t.src); });
+      playlistRef.current.forEach(t => {
+        if (t.isObjectUrl) URL.revokeObjectURL(t.src);
+        if (t.meta?.coverArtUrl) URL.revokeObjectURL(t.meta.coverArtUrl);
+      });
     };
   }, []);
 
-  // Keep refs in sync
   useEffect(() => { playlistRef.current = playlist; }, [playlist]);
-  const currentIndexRef = useRef(-1);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
   const playTrackByIndex = useCallback(async (index: number) => {
@@ -92,57 +119,80 @@ export function useAudioPlayer() {
     }
   }, [addHistory]);
 
-  // Load files from the browser file picker
-  const loadFiles = useCallback((files: FileList | null) => {
+  const loadFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const newTracks: Track[] = Array.from(files).map(file => ({
+    const fileArray = Array.from(files);
+
+    const newTracks: Track[] = fileArray.map(file => ({
       name: file.name,
       src: URL.createObjectURL(file),
       isObjectUrl: true,
     }));
+
+    let insertStart = 0;
     setPlaylist(prev => {
+      insertStart = prev.length;
       const merged = [...prev, ...newTracks];
       if (currentIndex === -1 && merged.length > 0) setShouldAutoPlay(true);
       return merged;
     });
+
+    // Extract metadata in background — non-blocking
+    fileArray.forEach((file, i) => {
+      extractMetadata(file).then(meta => {
+        if (!meta) return;
+        setPlaylist(prev => {
+          const updated = [...prev];
+          const idx = insertStart + i;
+          if (updated[idx]) {
+            // Revoke old cover art if any
+            if (updated[idx].meta?.coverArtUrl) {
+              URL.revokeObjectURL(updated[idx].meta!.coverArtUrl!);
+            }
+            updated[idx] = { ...updated[idx], meta };
+          }
+          return updated;
+        });
+      });
+    });
   }, [currentIndex]);
 
-  // Load tracks from Android MediaStore scanner
   const scanAndroidMusic = useCallback(() => {
-    // Support both bridge names (AndroidMusic from our code, AndroidBridge from Gemini's)
     const bridge = window.AndroidMusic || window.AndroidBridge;
     if (!bridge) {
-      console.warn("No Android bridge found. This feature only works in the Android app.");
+      setScanStatus("no-bridge");
+      setTimeout(() => setScanStatus("idle"), 3000);
       return false;
     }
 
-    setIsScanning(true);
+    setScanStatus("scanning");
     try {
       const raw = bridge.scanAllMusic?.() || (bridge as any).scanMusic?.();
-      if (!raw) { setIsScanning(false); return false; }
+      if (!raw) { setScanStatus("failed"); setTimeout(() => setScanStatus("idle"), 3000); return false; }
 
       const scanned: { name: string; uri: string }[] = JSON.parse(raw);
-      if (!scanned.length) { setIsScanning(false); return false; }
+      if (!scanned.length) { setScanStatus("failed"); setTimeout(() => setScanStatus("idle"), 3000); return false; }
 
       const newTracks: Track[] = scanned.map(item => ({
         name: item.name,
-        src: item.uri, // content:// URI — Android WebView can play these directly
+        src: item.uri,
         isObjectUrl: false,
       }));
 
-      setPlaylist(newTracks); // Replace playlist with full device scan
+      setPlaylist(newTracks);
       setCurrentIndex(-1);
       setShouldAutoPlay(true);
-      setIsScanning(false);
+      setScanStatus("success");
+      setTimeout(() => setScanStatus("idle"), 3000);
       return true;
     } catch (err) {
       console.error("Scan failed:", err);
-      setIsScanning(false);
+      setScanStatus("failed");
+      setTimeout(() => setScanStatus("idle"), 3000);
       return false;
     }
   }, []);
 
-  // Check if Android bridge is available
   const isAndroid = typeof window !== "undefined" &&
     !!(window.AndroidMusic || window.AndroidBridge);
 
@@ -161,8 +211,7 @@ export function useAudioPlayer() {
 
   const handleNext = useCallback(() => {
     if (playlistRef.current.length === 0) return;
-    const next = (currentIndexRef.current + 1) % playlistRef.current.length;
-    playTrackByIndex(next);
+    playTrackByIndex((currentIndexRef.current + 1) % playlistRef.current.length);
   }, [playTrackByIndex]);
 
   const handlePrev = useCallback(() => {
@@ -172,8 +221,7 @@ export function useAudioPlayer() {
       return;
     }
     const idx = currentIndexRef.current;
-    const prev = idx <= 0 ? playlistRef.current.length - 1 : idx - 1;
-    playTrackByIndex(prev);
+    playTrackByIndex(idx <= 0 ? playlistRef.current.length - 1 : idx - 1);
   }, [playTrackByIndex]);
 
   const seek = useCallback((percentage: number) => {
@@ -191,7 +239,6 @@ export function useAudioPlayer() {
     audioRef.current.currentTime = Math.max(audioRef.current.currentTime - seconds, 0);
   }, [duration]);
 
-  // Auto-play when new tracks are loaded
   useEffect(() => {
     if (shouldAutoPlay && currentIndex === -1 && playlist.length > 0) {
       playTrackByIndex(0);
@@ -206,7 +253,7 @@ export function useAudioPlayer() {
     progress,
     currentTime,
     duration,
-    isScanning,
+    scanStatus,
     isAndroid,
     loadFiles,
     scanAndroidMusic,
