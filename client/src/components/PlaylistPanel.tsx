@@ -239,7 +239,7 @@ export function PlaylistPanel({
                               {/* Cover art */}
                               <div className="w-9 h-9 flex-shrink-0 rounded overflow-hidden relative cursor-pointer" onClick={() => { onPlay(index); onClose(); }}>
                                 {track.meta?.coverArtUrl ? (
-                                  <img src={track.meta.coverArtUrl} alt={title} className="w-full h-full object-cover" />
+                                  <img src={track.meta.coverArtUrl} alt={title} className="w-full h-full object-contain bg-black" />
                                 ) : (
                                   <div className="w-full h-full bg-white/5 border border-white/10 flex items-center justify-center">
                                     <span className="text-[10px] text-white/30 font-mono">{index + 1}</span>
@@ -515,7 +515,7 @@ export function PlaylistPanel({
                                           <li key={i} className="flex items-center gap-3 px-4 py-2 hover:bg-white/[0.03] group/track">
                                             <div className="w-7 h-7 flex-shrink-0 rounded overflow-hidden">
                                               {match?.meta?.coverArtUrl ? (
-                                                <img src={match.meta.coverArtUrl} alt={name} className="w-full h-full object-cover" />
+                                                <img src={match.meta.coverArtUrl} alt={name} className="w-full h-full object-contain bg-black" />
                                               ) : (
                                                 <div className="w-full h-full bg-white/5 flex items-center justify-center">
                                                   <Music2 size={10} className="text-white/20" />

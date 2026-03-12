@@ -31,16 +31,22 @@ export default function Home() {
   const {
     playlist, currentTrack, isPlaying,
     progress, currentTime, duration,
-    scanStatus, isAndroid,
+    scanStatus, scanType, isAndroid, isFolderScanSupported,
     repeatMode, shuffleMode,
     currentIndex,
-    loadFiles, scanAndroidMusic,
+    loadFiles, scan,
     removeTrackFromQueue,
     togglePlayPause, playNext, playPrev,
     cycleRepeat, toggleShuffle,
     seek, skipForward, skipBackward,
     playTrack,
   } = useAudioPlayer();
+
+  const canScan = isAndroid || isFolderScanSupported;
+  const scanLabel = scanStatus === "scanning" ? "Scanning..."
+    : scanType === "folder" ? "Scan Folder"
+    : scanType === "android" ? "Scan Device"
+    : "Scan";
 
   const { data: historyItems, isLoading: isHistoryLoading } = useHistory();
 
@@ -89,9 +95,9 @@ export default function Home() {
               : scanStatus === "no-bridge" ? "text-white/50"
               : "text-red-400/70"
             }`}>
-              {scanStatus === "success" && `${playlist.length} tracks found`}
-              {scanStatus === "no-bridge" && "Auto scan works in the Android app"}
-              {scanStatus === "failed" && "Scan returned no results"}
+              {scanStatus === "success" && `${playlist.length} tracks loaded`}
+              {scanStatus === "no-bridge" && "Scan needs Android app or Chrome/Edge on desktop"}
+              {scanStatus === "failed" && "No audio files found"}
             </span>
           </motion.div>
         )}
@@ -130,14 +136,18 @@ export default function Home() {
           )}
 
           <button
-            onClick={scanAndroidMusic}
+            onClick={scan}
             disabled={scanStatus === "scanning"}
-            className="flex items-center gap-2 text-sm uppercase tracking-widest font-medium opacity-50 hover-glow disabled:opacity-20"
+            className={`flex items-center gap-2 text-sm uppercase tracking-widest font-medium hover-glow disabled:opacity-20 ${canScan ? "opacity-50" : "opacity-25"}`}
             data-testid="button-scan"
-            title={isAndroid ? "Scan all music on device" : "Android app only"}
+            title={
+              scanType === "android" ? "Scan all music on device"
+              : scanType === "folder" ? "Pick a folder to scan for music"
+              : "Requires Android app or Chrome/Edge on desktop"
+            }
           >
             {scanStatus === "scanning" ? <Loader2 size={16} className="animate-spin" /> : <ScanLine size={16} />}
-            <span className="hidden md:inline">{scanStatus === "scanning" ? "Scanning..." : "Scan"}</span>
+            <span className="hidden md:inline">{scanLabel}</span>
           </button>
 
           <button
@@ -173,7 +183,7 @@ export default function Home() {
                   className="w-64 h-64 md:w-80 md:h-80 rounded-xl border border-white/10 overflow-hidden bg-gradient-to-br from-white/5 to-white/[0.02] flex items-center justify-center hover:border-white/20 transition-colors duration-500"
                 >
                   {coverArtUrl ? (
-                    <img src={coverArtUrl} alt={displayTitle} className="w-full h-full object-cover" />
+                    <img src={coverArtUrl} alt={displayTitle} className="w-full h-full object-contain bg-black" />
                   ) : (
                     <div className="flex flex-col items-center justify-center gap-6">
                       <motion.div
@@ -326,19 +336,26 @@ export default function Home() {
               </button>
 
               <motion.button
-                onClick={scanAndroidMusic}
+                onClick={scan}
                 disabled={scanStatus === "scanning"}
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-3 px-8 py-3 rounded-lg border border-white/10 hover:border-white/25 text-white/40 hover:text-white/70 transition-all text-sm tracking-widest uppercase font-light disabled:opacity-30"
+                whileHover={{ scale: canScan ? 1.02 : 1 }} whileTap={{ scale: canScan ? 0.97 : 1 }}
+                className={`flex items-center gap-3 px-8 py-3 rounded-lg border text-sm tracking-widest uppercase font-light transition-all disabled:opacity-30 ${
+                  canScan
+                    ? "border-white/10 hover:border-white/25 text-white/40 hover:text-white/70"
+                    : "border-white/5 text-white/20 cursor-default"
+                }`}
                 data-testid="button-scan-empty"
               >
                 {scanStatus === "scanning" ? <Loader2 size={16} className="animate-spin" /> : <ScanLine size={16} />}
-                {scanStatus === "scanning" ? "Scanning device..." : "Auto Scan Music"}
+                {scanStatus === "scanning" ? "Scanning..."
+                  : scanType === "folder" ? "Scan Music Folder"
+                  : scanType === "android" ? "Scan Device"
+                  : "Auto Scan Music"}
               </motion.button>
 
-              {!isAndroid && (
+              {!canScan && (
                 <p className="text-xs text-white/20 uppercase tracking-widest text-center -mt-8">
-                  Auto scan works in the Android app
+                  Use Chrome/Edge on desktop, or the Android app
                 </p>
               )}
             </motion.div>
